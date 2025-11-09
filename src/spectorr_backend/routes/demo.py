@@ -3,6 +3,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -37,22 +38,36 @@ def generate_mock(run_id: str = Query(...), n: int = Query(200, ge=10, le=2000))
     if not rd.exists():
         raise HTTPException(404, "run_id not found; call /demo/start first")
 
-    # Call your existing mockgen + etl, but pointed at this run dir via env
     env = os.environ.copy()
     env["SPECTORR_DATA_ROOT"] = str(rd)
-    # You likely have a CLI or module entrypoint; this is a simple example:
-    # 1) mockgen populates raw/
-    # 2) etl reads raw/ -> writes curated/cleaned.csv
-    cmds = [
-        "poetry run python -m spectorr_pipeline.mockgen",  # ensure mockgen uses SPECTORR_DATA_ROOT
-        "poetry run python -m spectorr_pipeline.etl",
-    ]
-    for cmd in cmds:
-        ret = subprocess.run(shlex.split(cmd), env=env, capture_output=True, text=True)
-        if ret.returncode != 0:
-            raise HTTPException(500, f"step failed: {cmd}\n{ret.stderr}")
 
-    head = (rd / "curated" / "cleaned.csv").read_text(encoding="utf-8").splitlines()[:6]
+    steps = [
+        [sys.executable, "-m", "spectorr_pipeline.mockgen", "--n", str(n)],
+        [sys.executable, "-m", "spectorr_pipeline.etl"],
+    ]
+
+    for cmd in steps:
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        if proc.returncode != 0:
+            # Log to server console
+            print("=== DEMO /mockgen step failed ===", file=sys.stderr, flush=True)
+            print("CMD:", " ".join(cmd), file=sys.stderr, flush=True)
+            print("STDOUT (tail):", proc.stdout[-800:], file=sys.stderr, flush=True)
+            print("STDERR (tail):", proc.stderr[-1200:], file=sys.stderr, flush=True)
+            # Return detail to the UI
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "step": " ".join(cmd),
+                    "stdout_tail": proc.stdout[-800:],
+                    "stderr_tail": proc.stderr[-1200:],
+                },
+            )
+
+    cleaned = rd / "curated" / "cleaned.csv"
+    if not cleaned.exists():
+        raise HTTPException(500, "cleaned.csv missing after ETL")
+    head = cleaned.read_text(encoding="utf-8").splitlines()[:20]
     return {"run_id": run_id, "cleaned_head": head}
 
 
@@ -94,22 +109,36 @@ def run_pipeline(run_id: str = Query(...), asset_id: str | None = None, date: st
 
 
 @router.get("/stream")
-def stream_logs(run_id: str = Query(...)):
+def stream_pipeline(run_id: str = Query(...), asset_id: str | None = None, date: str | None = None):
     rd = run_dir(run_id)
-    pid_file = rd / "proc.pid"
-    if not pid_file.exists():
-        raise HTTPException(404, "no active process for this run")
+    if not (rd / "curated" / "cleaned.csv").exists():
+        raise HTTPException(400, "No cleaned.csv. Run /demo/mockgen first.")
 
     def event_stream():
-        yield "event: info\ndata: Starting pipeline…\n\n"
+        # tell client we started
+        yield "event: info\ndata: starting pipeline…\n\n"
+
         env = os.environ.copy()
         env["SPECTORR_DATA_ROOT"] = str(rd)
-        cmd = "poetry run python -m spectorr_pipeline.e2e"
+        env["PYTHONUNBUFFERED"] = "1"  # 👈 critical: unbuffered Python
+        cmd = [sys.executable, "-m", "spectorr_pipeline.e2e"]
+        if asset_id:
+            cmd.append(asset_id)
+        if date:
+            cmd.append(date)
+
+        # bufsize=1 + text=True makes it line-buffered on our side
         with subprocess.Popen(
-            shlex.split(cmd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         ) as p:
+            assert p.stdout is not None
             for line in p.stdout:
-                # turn each log line into an SSE message
+                # forward each log line (your adapter prints with flush=True)
                 yield f"data: {line.rstrip()}\n\n"
             code = p.wait()
             status = "done" if code == 0 else f"error({code})"
