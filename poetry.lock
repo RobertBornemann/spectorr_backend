@@ -1591,7 +1591,7 @@ optional = false
 python-versions = "^3.11"
 groups = ["main"]
 files = []
-develop = true
+develop = false
 
 [package.dependencies]
 anthropic = "^0.72.0"
@@ -1604,8 +1604,10 @@ python-dotenv = "^1.2.1"
 typer = "^0.12.5"
 
 [package.source]
-type = "directory"
-url = "../spectorr-pipeline"
+type = "git"
+url = "https://github.com/RobertBornemann/spectorr_pipeline"
+reference = "main"
+resolved_reference = "f71d673068cf7f74753e3c0c2e92041e1cd21e2c"
 
 [[package]]
 name = "starlette"
@@ -2016,4 +2018,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "5d8cbd8d8d72c0a4785c8b22cee72baf098c842b468f86dab22b7e887edf2210"
+content-hash = "a2e0ea5bba3f9026871d9fb1963626deace66515a877c29317b076003bf746ba"
