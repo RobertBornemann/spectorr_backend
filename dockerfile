@@ -26,4 +26,4 @@ RUN mkdir -p /data
 ENV SPECTORR_DATA_ROOT=/data
 
 EXPOSE 8000
-CMD ["poetry","run","uvicorn","spectorr_backend.app:app","--host","0.0.0.0","--port","8000","--workers","1"]
+CMD ["sh","-c","poetry run uvicorn spectorr_backend.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
