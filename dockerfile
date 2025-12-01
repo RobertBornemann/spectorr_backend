@@ -22,6 +22,7 @@ COPY src ./src
 
 # Make sure Python can see /app/src
 ENV PYTHONPATH=/app/src
+# Add AWS credentials to the environment
 
 # Expose and start (shell form so $PORT expands on Railway)
 ENV PORT=8000
